@@ -1,18 +1,12 @@
 import React, { useState } from "react";
 import { RELAYER_SDK_VERSION as version } from "@walletconnect/core";
-import {
-  formatDirectSignDoc,
-  stringifySignDocValues,
-  verifyAminoSignature,
-  verifyDirectSignature,
-} from "cosmos-wallet";
 
 import Banner from "./../components/Banner";
 import Blockchain from "./../components/Blockchain";
 import Column from "./../components/Column";
 import Header from "./../components/Header";
 import Modal from "./../components/Modal";
-import { DEFAULT_MAIN_CHAINS } from "./../constants";
+import { DEFAULT_TEST_CHAINS } from "./../constants";
 import { AccountAction } from "./../helpers";
 import RequestModal from "./../modals/RequestModal";
 import PingModal from "./../modals/PingModal";
@@ -31,14 +25,6 @@ interface IFormattedRpcResponse {
   address?: string;
   valid?: boolean;
   result: string;
-}
-
-interface CosmosRpcResponse {
-  pub_key: {
-    type: string;
-    value: string;
-  };
-  signature: string;
 }
 
 export default function App() {
@@ -62,7 +48,7 @@ export default function App() {
     chainData,
     isInitializing,
     onEnable,
-    cosmosProvider,
+    nearProvider,
   } = useWalletConnectClient();
 
   const ping = async () => {
@@ -72,9 +58,9 @@ export default function App() {
 
     try {
       setIsRpcRequestPending(true);
-      const session = cosmosProvider?.session;
+      const session = nearProvider?.session;
       if (!session) return;
-      await cosmosProvider.client?.ping({ topic: session.topic! });
+      await nearProvider.client?.ping({ topic: session.topic! });
       setRpcResult({
         address: "",
         method: "ping",
@@ -93,34 +79,10 @@ export default function App() {
     await ping();
   };
 
-  const testSignDirect: (account: string) => Promise<IFormattedRpcResponse> = async account => {
-    if (!cosmosProvider) {
-      throw new Error("cosmosProvider not connected");
+  const testSignAndSendTransactions: (account: string) => Promise<IFormattedRpcResponse> = async account => {
+    if (!nearProvider) {
+      throw new Error("nearProvider not connected");
     }
-
-    // test direct sign doc inputs
-    const inputs = {
-      fee: [{ amount: "2000", denom: "ucosm" }],
-      pubkey: "AgSEjOuOr991QlHCORRmdE5ahVKeyBrmtgoYepCpQGOW",
-      gasLimit: 200000,
-      accountNumber: 1,
-      sequence: 1,
-      bodyBytes:
-        "0a90010a1c2f636f736d6f732e62616e6b2e763162657461312e4d736753656e6412700a2d636f736d6f7331706b707472653766646b6c366766727a6c65736a6a766878686c63337234676d6d6b38727336122d636f736d6f7331717970717870713971637273737a673270767871367273307a716733797963356c7a763778751a100a0575636f736d120731323334353637",
-      authInfoBytes:
-        "0a500a460a1f2f636f736d6f732e63727970746f2e736563703235366b312e5075624b657912230a21034f04181eeba35391b858633a765c4a0c189697b40d216354d50890d350c7029012040a020801180112130a0d0a0575636f736d12043230303010c09a0c",
-    };
-
-    // format sign doc
-    const signDoc = formatDirectSignDoc(
-      inputs.fee,
-      inputs.pubkey,
-      inputs.gasLimit,
-      inputs.accountNumber,
-      inputs.sequence,
-      inputs.bodyBytes,
-      "cosmoshub-4",
-    );
 
     const address = account.split(":").pop();
 
@@ -128,41 +90,57 @@ export default function App() {
       throw new Error(`Could not derive address from account: ${account}`);
     }
 
-    // cosmos_signDirect params
-    const params = {
-      signerAddress: address,
-      signDoc: stringifySignDocValues(signDoc),
-    };
+    // test signAndSendTransactions
 
-    const result = await cosmosProvider.request<CosmosRpcResponse>({
-      method: "cosmos_signDirect",
+    const transactions = [
+      {
+        signerId: address,
+        receiverId: "guest-book.testnet",
+        actions: [{
+          type: "FunctionCall",
+          params: {
+            methodName: "addMessage",
+            args: { text: "Hello from Wallet Connect! (1/2)" },
+            gas: "30000000000000",
+            deposit: "0",
+          }
+        }]
+      },
+      {
+        signerId: address,
+        receiverId: "guest-book.testnet",
+        actions: [{
+          type: "FunctionCall",
+          params: {
+            methodName: "addMessage",
+            args: { text: "Hello from Wallet Connect! (2/2)" },
+            gas: "30000000000000",
+            deposit: "0",
+          }
+        }]
+      }
+    ]
+
+    // near_signAndSendTransactions params
+    const params = { transactions };
+
+    const result = await nearProvider.request({
+      method: "near_signAndSendTransactions",
       params,
     });
 
-    const valid = await verifyDirectSignature(address, result.signature, signDoc);
-
     return {
-      method: "cosmos_signDirect",
+      method: "near_signAndSendTransactions",
       address,
-      valid,
-      result: result.signature,
+      valid: true,
+      result: JSON.stringify((result as any).map((r: any) => r.transaction)),
     };
   };
 
-  const testSignAmino: (account: string) => Promise<IFormattedRpcResponse> = async account => {
-    if (!cosmosProvider) {
-      throw new Error("cosmosProvider not connected");
+  const testSignAndSendTransaction: (account: string) => Promise<IFormattedRpcResponse> = async account => {
+    if (!nearProvider) {
+      throw new Error("nearProvider not connected");
     }
-
-    // test amino sign doc
-    const signDoc = {
-      msgs: [],
-      fee: { amount: [], gas: "23" },
-      chain_id: "foochain",
-      memo: "hello, world",
-      account_number: "7",
-      sequence: "54",
-    };
 
     const address = account.split(":").pop();
 
@@ -170,25 +148,41 @@ export default function App() {
       throw new Error(`Could not derive address from account: ${account}`);
     }
 
-    // cosmos_signAmino params
-    const params = { signerAddress: address, signDoc };
+    // test signAndSendTransaction
 
-    const result = await cosmosProvider.request<CosmosRpcResponse>({
-      method: "cosmos_signAmino",
+    const transaction = {
+      signerId: address,
+      receiverId: "guest-book.testnet",
+      actions: [
+        {
+          type: "FunctionCall",
+          params: {
+            methodName: "addMessage",
+            args: { text: "Hello from Wallet Connect!" },
+            gas: "30000000000000",
+            deposit: "0",
+          },
+        },
+      ],
+    }
+
+    // near_signAndSendTransaction params
+    const params = { transaction };
+
+    const result = await nearProvider.request({
+      method: "near_signAndSendTransaction",
       params,
     });
 
-    const valid = await verifyAminoSignature(address, result.signature, signDoc);
-
     return {
-      method: "cosmos_signAmino",
+      method: "near_signAndSendTransaction",
       address,
-      valid,
-      result: result.signature,
+      valid: true,
+      result: JSON.stringify((result as any).transaction),
     };
   };
 
-  const getCosmosActions = (): AccountAction[] => {
+  const getNearActions = (): AccountAction[] => {
     const wrapRpcRequest =
       (rpcRequest: (account: string) => Promise<IFormattedRpcResponse>) =>
       async (account: string) => {
@@ -206,8 +200,8 @@ export default function App() {
       };
 
     return [
-      { method: "cosmos_signDirect", callback: wrapRpcRequest(testSignDirect) },
-      { method: "cosmos_signAmino", callback: wrapRpcRequest(testSignAmino) },
+      { method: "near_signAndSendTransaction", callback: wrapRpcRequest(testSignAndSendTransaction) },
+      { method: "near_signAndSendTransactions", callback: wrapRpcRequest(testSignAndSendTransactions) },
     ];
   };
 
@@ -224,7 +218,7 @@ export default function App() {
   };
 
   const renderContent = () => {
-    const chainOptions = DEFAULT_MAIN_CHAINS;
+    const chainOptions = DEFAULT_TEST_CHAINS;
     return !accounts.length && !Object.keys(balances).length ? (
       <SLanding center>
         <Banner />
@@ -232,7 +226,7 @@ export default function App() {
           <span>{`Using v${version}`}</span>
         </h6>
         <SButtonContainer>
-          <h6>Select Cosmos chain:</h6>
+          <h6>Select NEAR chain:</h6>
           {chainOptions.map(chainId => (
             <Blockchain key={chainId} chainId={chainId} chainData={chainData} onClick={onEnable} />
           ))}
@@ -251,7 +245,7 @@ export default function App() {
                 address={account}
                 chainId={chain}
                 balances={balances}
-                actions={getCosmosActions()}
+                actions={getNearActions()}
               />
             );
           })}

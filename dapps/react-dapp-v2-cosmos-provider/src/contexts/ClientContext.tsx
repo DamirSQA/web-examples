@@ -12,13 +12,13 @@ import {
   useState,
 } from "react";
 import {
-  DEFAULT_COSMOS_METHODS,
+  DEFAULT_NEAR_METHODS,
   DEFAULT_LOGGER,
   DEFAULT_PROJECT_ID,
   DEFAULT_RELAY_URL,
 } from "../constants";
 import { AccountBalances, ChainNamespaces, getAllChainNamespaces } from "../helpers";
-import { apiGetChainNamespace, ChainsMap } from "caip-api";
+// import { apiGetChainNamespace, ChainsMap } from "caip-api";
 
 /**
  * Types
@@ -34,7 +34,7 @@ interface IContext {
   balances: AccountBalances;
   chainData: ChainNamespaces;
   onEnable: (chainId: string) => Promise<void>;
-  cosmosProvider?: IUniversalProvider;
+  nearProvider?: IUniversalProvider;
 }
 
 /**
@@ -51,7 +51,7 @@ export function ClientContextProvider({ children }: { children: ReactNode | Reac
   const [session, setSession] = useState<SessionTypes.Struct>();
   const [web3Modal, setWeb3Modal] = useState<Web3Modal>();
 
-  const [cosmosProvider, setCosmosProvider] = useState<UniversalProvider>();
+  const [nearProvider, setNearProvider] = useState<UniversalProvider>();
 
   const [isInitializing, setIsInitializing] = useState(false);
   const [hasCheckedPersistedSession, setHasCheckedPersistedSession] = useState(false);
@@ -70,31 +70,46 @@ export function ClientContextProvider({ children }: { children: ReactNode | Reac
   };
 
   const loadChainData = async () => {
-    const namespaces = getAllChainNamespaces();
-    const chainData: ChainNamespaces = {};
-    await Promise.all(
-      namespaces.map(async namespace => {
-        let chains: ChainsMap | undefined;
-        try {
-          chains = await apiGetChainNamespace(namespace);
-        } catch (e) {
-          // ignore error
-        }
-        if (typeof chains !== "undefined") {
-          chainData[namespace] = chains;
-        }
-      }),
-    );
-    setChainData(chainData);
+    setChainData({
+      near: {
+        testnet: {
+          name: "NEAR Testnet",
+          id: "near:testnet",
+          rpc: ["https://rpc.testnet.near.org"],
+          slip44: 397,
+          testnet: true,
+        },
+      }
+    });
+
+    // TODO: Check with WalletConnect team on how to add NEAR to CAIP-API and load NEAR data dynamically and remove above hard-coded code.
+    return;
+
+    // const namespaces = getAllChainNamespaces();
+    // const chainData: ChainNamespaces = {};
+    // await Promise.all(
+    //   namespaces.map(async namespace => {
+    //     let chains: ChainsMap | undefined;
+    //     try {
+    //       chains = await apiGetChainNamespace(namespace);
+    //     } catch (e) {
+    //       // ignore error
+    //     }
+    //     if (typeof chains !== "undefined") {
+    //       chainData[namespace] = chains;
+    //     }
+    //   }),
+    // );
+    // setChainData(chainData);
   };
 
   const disconnect = useCallback(async () => {
-    if (typeof cosmosProvider === "undefined") {
-      throw new Error("cosmosProvider is not initialized");
+    if (typeof nearProvider === "undefined") {
+      throw new Error("nearProvider is not initialized");
     }
-    cosmosProvider.disconnect();
+    nearProvider.disconnect();
     resetApp();
-  }, [cosmosProvider]);
+  }, [nearProvider]);
 
   const onSessionConnected = useCallback(async (_session: SessionTypes.Struct) => {
     setSession(_session);
@@ -125,7 +140,7 @@ export function ClientContextProvider({ children }: { children: ReactNode | Reac
         relayUrl: DEFAULT_RELAY_URL,
       });
 
-      setCosmosProvider(provider);
+      setNearProvider(provider);
       setClient(provider.client);
 
       const web3Modal = new Web3Modal({
@@ -143,7 +158,7 @@ export function ClientContextProvider({ children }: { children: ReactNode | Reac
 
   const onEnable = useCallback(
     async (caipChainId: string) => {
-      if (!cosmosProvider) {
+      if (!nearProvider) {
         throw new ReferenceError("WalletConnect Client is not initialized.");
       }
 
@@ -153,20 +168,20 @@ export function ClientContextProvider({ children }: { children: ReactNode | Reac
         throw new Error("Could not derive chainId from CAIP chainId");
       }
 
-      console.log("Enabling cosmosProvider for chainId: ", chainId);
+      console.log("Enabling nearProvider for chainId: ", chainId);
 
       //  Create WalletConnect Provider
-      const session = await cosmosProvider.connect({
+      const session = await nearProvider.connect({
         namespaces: {
-          cosmos: {
-            methods: DEFAULT_COSMOS_METHODS,
+          near: {
+            methods: DEFAULT_NEAR_METHODS,
             chains: [caipChainId],
             events: ["chainChanged", "accountsChanged"],
           },
         },
       });
 
-      const _accounts = await cosmosProvider.enable();
+      const _accounts = await nearProvider.enable();
       setAccounts(_accounts);
       setSession(session);
       onSessionConnected(session!);
@@ -174,7 +189,7 @@ export function ClientContextProvider({ children }: { children: ReactNode | Reac
 
       web3Modal?.closeModal();
     },
-    [cosmosProvider, onSessionConnected, web3Modal],
+    [nearProvider, onSessionConnected, web3Modal],
   );
 
   const _checkForPersistedSession = useCallback(
@@ -213,19 +228,19 @@ export function ClientContextProvider({ children }: { children: ReactNode | Reac
   }, [client, createClient]);
 
   useEffect(() => {
-    if (cosmosProvider && web3Modal) _subscribeToProviderEvents(cosmosProvider);
-  }, [_subscribeToProviderEvents, cosmosProvider, web3Modal]);
+    if (nearProvider && web3Modal) _subscribeToProviderEvents(nearProvider);
+  }, [_subscribeToProviderEvents, nearProvider, web3Modal]);
 
   useEffect(() => {
     const getPersistedSession = async () => {
-      if (cosmosProvider && !hasCheckedPersistedSession) {
-        await _checkForPersistedSession(cosmosProvider);
+      if (nearProvider && !hasCheckedPersistedSession) {
+        await _checkForPersistedSession(nearProvider);
         setHasCheckedPersistedSession(true);
       }
     };
 
     getPersistedSession();
-  }, [cosmosProvider, _checkForPersistedSession, hasCheckedPersistedSession]);
+  }, [nearProvider, _checkForPersistedSession, hasCheckedPersistedSession]);
 
   const value = useMemo(
     () => ({
@@ -239,7 +254,7 @@ export function ClientContextProvider({ children }: { children: ReactNode | Reac
       disconnect,
       chainData,
       onEnable,
-      cosmosProvider,
+      nearProvider,
     }),
     [
       pairings,
@@ -252,7 +267,7 @@ export function ClientContextProvider({ children }: { children: ReactNode | Reac
       disconnect,
       chainData,
       onEnable,
-      cosmosProvider,
+      nearProvider,
     ],
   );
 
